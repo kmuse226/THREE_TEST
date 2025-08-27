@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Browser Memory Limit Test</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #1a1a1a;
+      color: #fff;
+      padding: 20px;
+      margin: 0;
+    }
+    
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    
+    h1 {
+      color: #00ff88;
+      border-bottom: 2px solid #00ff88;
+      padding-bottom: 10px;
+    }
+    
+    .test-section {
+      background: #2a2a2a;
+      border-radius: 10px;
+      padding: 20px;
+      margin: 20px 0;
+    }
+    
+    .test-section h2 {
+      color: #00ffff;
+      margin-top: 0;
+    }
+    
+    button {
+      background: linear-gradient(135deg, #00ff88, #00ffff);
+      color: #000;
+      border: none;
+      padding: 12px 24px;
+      font-size: 16px;
+      font-weight: bold;
+      border-radius: 5px;
+      cursor: pointer;
+      margin: 10px 10px 10px 0;
+      transition: transform 0.2s;
+    }
+    
+    button:hover {
+      transform: scale(1.05);
+    }
+    
+    button:active {
+      transform: scale(0.95);
+    }
+    
+    .result {
+      background: #333;
+      padding: 15px;
+      border-radius: 5px;
+      margin-top: 15px;
+      font-family: 'Courier New', monospace;
+      white-space: pre-wrap;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    
+    .success {
+      color: #00ff88;
+    }
+    
+    .error {
+      color: #ff4444;
+    }
+    
+    .warning {
+      color: #ffaa00;
+    }
+    
+    .info {
+      color: #00aaff;
+    }
+    
+    .progress {
+      background: #333;
+      height: 30px;
+      border-radius: 15px;
+      overflow: hidden;
+      margin: 10px 0;
+    }
+    
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #00ff88, #00ffff);
+      transition: width 0.3s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #000;
+      font-weight: bold;
+    }
+    
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+    
+    th, td {
+      padding: 8px;
+      text-align: left;
+      border-bottom: 1px solid #444;
+    }
+    
+    th {
+      background: #333;
+      color: #00ff88;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔬 Browser Memory Limit Tester</h1>
+    
+    <div class="test-section">
+      <h2>System Information</h2>
+      <div id="system-info" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+      <h2>ArrayBuffer Limit Test</h2>
+      <p>Tests the maximum size of ArrayBuffer your browser can allocate</p>
+      <button onclick="testArrayBufferLimit()">Test ArrayBuffer Limit</button>
+      <button onclick="testIncrementalArrayBuffer()">Test Incremental (Safer)</button>
+      <div id="arraybuffer-result" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+      <h2>WebGL Texture Limit Test</h2>
+      <p>Tests WebGL texture size limits for 3D rendering</p>
+      <button onclick="testWebGLLimits()">Test WebGL Limits</button>
+      <div id="webgl-result" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+      <h2>Memory Stress Test</h2>
+      <p>Gradually allocates memory to find practical limits</p>
+      <button onclick="startMemoryStressTest()">Start Stress Test</button>
+      <button onclick="stopMemoryStressTest()">Stop Test</button>
+      <div class="progress">
+        <div id="stress-progress" class="progress-bar" style="width: 0%">0 MB</div>
+      </div>
+      <div id="stress-result" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+      <h2>File API Limit Test</h2>
+      <p>Tests File API read limits</p>
+      <input type="file" id="file-test" accept=".glb,.gltf,*">
+      <div id="file-result" class="result"></div>
+    </div>
+  </div>
+
+  <script>
+    let stressTestRunning = false;
+    let allocatedArrays = [];
+    
+    // System Information
+    function getSystemInfo() {
+      const info = [];
+      
+      // Browser Info
+      info.push('<span class="info">📊 Browser Information:</span>');
+      info.push(`User Agent: ${navigator.userAgent}`);
+      info.push(`Platform: ${navigator.platform}`);
+      info.push(`Language: ${navigator.language}`);
+      info.push(`Cookies Enabled: ${navigator.cookieEnabled}`);
+      info.push(`Online: ${navigator.onLine}`);
+      info.push(`Hardware Concurrency: ${navigator.hardwareConcurrency || 'N/A'}`);
+      
+      // Memory Info (Chrome only)
+      if (performance.memory) {
+        info.push('\n<span class="info">💾 Memory Information (Chrome/Edge):</span>');
+        info.push(`JS Heap Size Limit: ${(performance.memory.jsHeapSizeLimit / 1024 / 1024).toFixed(2)} MB`);
+        info.push(`Total JS Heap Size: ${(performance.memory.totalJSHeapSize / 1024 / 1024).toFixed(2)} MB`);
+        info.push(`Used JS Heap Size: ${(performance.memory.usedJSHeapSize / 1024 / 1024).toFixed(2)} MB`);
+      } else {
+        info.push('\n<span class="warning">⚠️ Memory API not available (Non-Chromium browser)</span>');
+      }
+      
+      // Device Memory (Chrome 63+)
+      if (navigator.deviceMemory) {
+        info.push(`\nDevice Memory: ~${navigator.deviceMemory} GB`);
+      }
+      
+      // Connection Info
+      if (navigator.connection) {
+        info.push('\n<span class="info">🌐 Connection Information:</span>');
+        info.push(`Effective Type: ${navigator.connection.effectiveType || 'N/A'}`);
+        info.push(`Downlink: ${navigator.connection.downlink || 'N/A'} Mbps`);
+        info.push(`RTT: ${navigator.connection.rtt || 'N/A'} ms`);
+      }
+      
+      document.getElementById('system-info').innerHTML = info.join('\n');
+    }
+    
+    // ArrayBuffer Limit Test
+    async function testArrayBufferLimit() {
+      const resultDiv = document.getElementById('arraybuffer-result');
+      const results = [];
+      results.push('<span class="info">Starting ArrayBuffer limit test...</span>\n');
+      
+      // Test common sizes
+      const testSizes = [
+        { size: 100, unit: 'MB' },
+        { size: 500, unit: 'MB' },
+        { size: 1024, unit: 'MB (1 GB)' },
+        { size: 2048, unit: 'MB (2 GB)' },
+        { size: 3072, unit: 'MB (3 GB)' },
+        { size: 4096, unit: 'MB (4 GB)' },
+        { size: 8192, unit: 'MB (8 GB)' }
+      ];
+      
+      let maxSuccessful = 0;
+      
+      for (const test of testSizes) {
+        try {
+          const bytes = test.size * 1024 * 1024;
+          const buffer = new ArrayBuffer(bytes);
+          
+          if (buffer.byteLength === bytes) {
+            results.push(`<span class="success">✅ ${test.size} ${test.unit}: SUCCESS</span>`);
+            maxSuccessful = test.size;
+            
+            // Clean up
+            delete buffer;
+          } else {
+            results.push(`<span class="warning">⚠️ ${test.size} ${test.unit}: Partial allocation</span>`);
+            break;
+          }
+        } catch (e) {
+          results.push(`<span class="error">❌ ${test.size} ${test.unit}: ${e.message}</span>`);
+          break;
+        }
+        
+        resultDiv.innerHTML = results.join('\n');
+        
+        // Small delay to allow UI update
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      results.push(`\n<span class="info">📊 Maximum successful ArrayBuffer: ${maxSuccessful} MB</span>`);
+      resultDiv.innerHTML = results.join('\n');
+    }
+    
+    // Incremental ArrayBuffer Test
+    async function testIncrementalArrayBuffer() {
+      const resultDiv = document.getElementById('arraybuffer-result');
+      const results = [];
+      results.push('<span class="info">Starting incremental test (binary search)...</span>\n');
+      
+      let low = 0;
+      let high = 8192; // 8GB max
+      let maxSuccessful = 0;
+      
+      while (low <= high) {
+        const mid = Math.floor((low + high) / 2);
+        
+        try {
+          const buffer = new ArrayBuffer(mid * 1024 * 1024);
+          
+          if (buffer.byteLength === mid * 1024 * 1024) {
+            results.push(`<span class="success">✅ ${mid} MB: SUCCESS</span>`);
+            maxSuccessful = mid;
+            low = mid + 1;
+          } else {
+            high = mid - 1;
+          }
+          
+          delete buffer;
+        } catch (e) {
+          results.push(`<span class="error">❌ ${mid} MB: Failed</span>`);
+          high = mid - 1;
+        }
+        
+        resultDiv.innerHTML = results.join('\n') + `\n<span class="info">Current max: ${maxSuccessful} MB</span>`;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      
+      results.push(`\n<span class="success">🎯 Maximum ArrayBuffer size: ${maxSuccessful} MB</span>`);
+      resultDiv.innerHTML = results.join('\n');
+    }
+    
+    // WebGL Limits Test
+    function testWebGLLimits() {
+      const resultDiv = document.getElementById('webgl-result');
+      const results = [];
+      
+      try {
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+        
+        if (!gl) {
+          results.push('<span class="error">WebGL not supported</span>');
+          resultDiv.innerHTML = results.join('\n');
+          return;
+        }
+        
+        results.push('<span class="info">📐 WebGL Context Limits:</span>\n');
+        
+        const limits = {
+          'MAX_TEXTURE_SIZE': gl.MAX_TEXTURE_SIZE,
+          'MAX_CUBE_MAP_TEXTURE_SIZE': gl.MAX_CUBE_MAP_TEXTURE_SIZE,
+          'MAX_RENDERBUFFER_SIZE': gl.MAX_RENDERBUFFER_SIZE,
+          'MAX_VIEWPORT_DIMS': gl.MAX_VIEWPORT_DIMS,
+          'MAX_VERTEX_TEXTURE_IMAGE_UNITS': gl.MAX_VERTEX_TEXTURE_IMAGE_UNITS,
+          'MAX_TEXTURE_IMAGE_UNITS': gl.MAX_TEXTURE_IMAGE_UNITS,
+          'MAX_COMBINED_TEXTURE_IMAGE_UNITS': gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS,
+          'MAX_VERTEX_ATTRIBS': gl.MAX_VERTEX_ATTRIBS,
+          'MAX_VERTEX_UNIFORM_VECTORS': gl.MAX_VERTEX_UNIFORM_VECTORS,
+          'MAX_FRAGMENT_UNIFORM_VECTORS': gl.MAX_FRAGMENT_UNIFORM_VECTORS,
+          'MAX_VARYING_VECTORS': gl.MAX_VARYING_VECTORS
+        };
+        
+        results.push('<table>');
+        results.push('<tr><th>Parameter</th><th>Value</th></tr>');
+        
+        for (const [key, constant] of Object.entries(limits)) {
+          const value = gl.getParameter(constant);
+          results.push(`<tr><td>${key}</td><td>${Array.isArray(value) ? value.join(' x ') : value}</td></tr>`);
+        }
+        
+        results.push('</table>');
+        
+        // Get renderer info
+        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+        if (debugInfo) {
+          const vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+          const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+          results.push(`\n<span class="info">🎮 GPU Info:</span>`);
+          results.push(`Vendor: ${vendor}`);
+          results.push(`Renderer: ${renderer}`);
+        }
+        
+        // Test actual texture allocation
+        results.push('\n<span class="info">Testing actual texture allocation...</span>');
+        const maxSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+        
+        try {
+          const texture = gl.createTexture();
+          gl.bindTexture(gl.TEXTURE_2D, texture);
+          
+          // Try to allocate maximum size texture
+          const testSize = Math.min(maxSize, 4096); // Cap at 4K for safety
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, testSize, testSize, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+          
+          const error = gl.getError();
+          if (error === gl.NO_ERROR) {
+            results.push(`<span class="success">✅ Successfully allocated ${testSize}x${testSize} texture</span>`);
+          } else {
+            results.push(`<span class="error">❌ Failed to allocate ${testSize}x${testSize} texture</span>`);
+          }
+          
+          gl.deleteTexture(texture);
+        } catch (e) {
+          results.push(`<span class="error">❌ Texture allocation error: ${e.message}</span>`);
+        }
+        
+      } catch (e) {
+        results.push(`<span class="error">Error: ${e.message}</span>`);
+      }
+      
+      resultDiv.innerHTML = results.join('\n');
+    }
+    
+    // Memory Stress Test
+    async function startMemoryStressTest() {
+      if (stressTestRunning) return;
+      
+      stressTestRunning = true;
+      allocatedArrays = [];
+      
+      const resultDiv = document.getElementById('stress-result');
+      const progressBar = document.getElementById('stress-progress');
+      const results = [];
+      
+      results.push('<span class="info">Starting memory stress test...</span>');
+      resultDiv.innerHTML = results.join('\n');
+      
+      const chunkSize = 50; // 50MB chunks
+      let totalAllocated = 0;
+      let failed = false;
+      
+      while (stressTestRunning && !failed) {
+        try {
+          const buffer = new ArrayBuffer(chunkSize * 1024 * 1024);
+          allocatedArrays.push(buffer);
+          totalAllocated += chunkSize;
+          
+          progressBar.style.width = `${Math.min((totalAllocated / 4096) * 100, 100)}%`;
+          progressBar.textContent = `${totalAllocated} MB`;
+          
+          if (performance.memory) {
+            const used = (performance.memory.usedJSHeapSize / 1024 / 1024).toFixed(0);
+            const limit = (performance.memory.jsHeapSizeLimit / 1024 / 1024).toFixed(0);
+            results.push(`<span class="success">Allocated: ${totalAllocated} MB | Heap: ${used}/${limit} MB</span>`);
+          } else {
+            results.push(`<span class="success">Allocated: ${totalAllocated} MB</span>`);
+          }
+          
+          resultDiv.innerHTML = results.slice(-10).join('\n');
+          
+          await new Promise(resolve => setTimeout(resolve, 100));
+        } catch (e) {
+          failed = true;
+          results.push(`<span class="error">❌ Failed at ${totalAllocated} MB: ${e.message}</span>`);
+          results.push(`<span class="info">🎯 Maximum allocated: ${totalAllocated - chunkSize} MB</span>`);
+          resultDiv.innerHTML = results.slice(-12).join('\n');
+        }
+      }
+      
+      // Cleanup
+      allocatedArrays = [];
+      if (!failed && stressTestRunning) {
+        results.push(`<span class="warning">⚠️ Test stopped at ${totalAllocated} MB</span>`);
+        resultDiv.innerHTML = results.slice(-12).join('\n');
+      }
+      
+      stressTestRunning = false;
+    }
+    
+    function stopMemoryStressTest() {
+      stressTestRunning = false;
+      allocatedArrays = [];
+    }
+    
+    // File API Test
+    document.getElementById('file-test').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      const resultDiv = document.getElementById('file-result');
+      const results = [];
+      
+      const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
+      results.push(`<span class="info">📁 File: ${file.name}</span>`);
+      results.push(`Size: ${fileSizeMB} MB`);
+      results.push('');
+      
+      // Test FileReader
+      results.push('<span class="info">Testing FileReader.readAsArrayBuffer()...</span>');
+      
+      try {
+        const startTime = performance.now();
+        const reader = new FileReader();
+        
+        await new Promise((resolve, reject) => {
+          reader.onload = () => resolve();
+          reader.onerror = () => reject(reader.error);
+          reader.readAsArrayBuffer(file);
+        });
+        
+        const endTime = performance.now();
+        const duration = ((endTime - startTime) / 1000).toFixed(2);
+        
+        results.push(`<span class="success">✅ Successfully read ${fileSizeMB} MB in ${duration} seconds</span>`);
+        results.push(`Speed: ${(fileSizeMB / duration).toFixed(2)} MB/s`);
+      } catch (e) {
+        results.push(`<span class="error">❌ FileReader failed: ${e.message}</span>`);
+      }
+      
+      // Test Blob.arrayBuffer()
+      if (file.arrayBuffer) {
+        results.push('');
+        results.push('<span class="info">Testing Blob.arrayBuffer()...</span>');
+        
+        try {
+          const startTime = performance.now();
+          const buffer = await file.arrayBuffer();
+          const endTime = performance.now();
+          const duration = ((endTime - startTime) / 1000).toFixed(2);
+          
+          results.push(`<span class="success">✅ Successfully read ${fileSizeMB} MB in ${duration} seconds</span>`);
+          results.push(`Speed: ${(fileSizeMB / duration).toFixed(2)} MB/s`);
+          results.push(`Buffer size: ${(buffer.byteLength / 1024 / 1024).toFixed(2)} MB`);
+        } catch (e) {
+          results.push(`<span class="error">❌ Blob.arrayBuffer() failed: ${e.message}</span>`);
+        }
+      }
+      
+      resultDiv.innerHTML = results.join('\n');
+    });
+    
+    // Initialize on load
+    window.onload = () => {
+      getSystemInfo();
+    };
+  </script>
+</body>
+</html>

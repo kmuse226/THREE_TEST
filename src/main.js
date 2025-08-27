@@ -196,15 +196,169 @@ class LargeGLBLoader {
     fileInput.addEventListener('change', (event) => {
       const file = event.target.files[0];
       if (file) {
-        this.loadGLBFile(file);
+        const fileSizeMB = file.size / 1024 / 1024;
+        
+        if (fileSizeMB > 1000) {
+          alert(`경고: ${fileSizeMB.toFixed(0)}MB 파일은 매우 큽니다.\n브라우저가 충돌할 수 있습니다.\n계속하시겠습니까?`);
+        }
+        
+        this.loadGLBFileInChunks(file);
       }
     });
     
-    const modelPath = './model/';
-    console.log(`Place your GLB files in: ${modelPath}`);
+    console.log('대용량 GLB 파일을 로드하려면 파일 선택 버튼을 사용하세요.');
+    console.log('model 폴더 경로: /model/');
+  }
+  
+  async loadGLBFromPath(path) {
+    const loader = document.getElementById('loader');
+    const progressBar = loader.querySelector('.progress-bar');
+    const percentEl = document.getElementById('load-percent');
+    loader.style.display = 'block';
+    
+    try {
+      // 스트리밍 방식으로 대용량 파일 로드
+      const response = await fetch(path, {
+        method: 'GET',
+        headers: {
+          'Cache-Control': 'no-cache'
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const contentLength = response.headers.get('content-length');
+      if (!contentLength) {
+        console.warn('Content-Length header not found');
+      }
+      
+      const total = parseInt(contentLength, 10);
+      const fileSize = (total / 1024 / 1024).toFixed(2);
+      document.getElementById('file-size').textContent = `File Size: ${fileSize} MB`;
+      this.stats.fileSize = parseFloat(fileSize);
+      
+      // 스트림 리더를 사용한 청크 단위 읽기
+      const reader = response.body.getReader();
+      const chunks = [];
+      let receivedLength = 0;
+      
+      while(true) {
+        const {done, value} = await reader.read();
+        
+        if (done) break;
+        
+        chunks.push(value);
+        receivedLength += value.length;
+        
+        const percent = Math.round((receivedLength / total) * 100);
+        progressBar.style.width = `${percent}%`;
+        percentEl.textContent = `${percent}%`;
+        
+        // 메모리 압박 완화를 위한 짧은 대기
+        if (receivedLength % (10 * 1024 * 1024) === 0) {
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+      }
+      
+      // 청크들을 하나의 ArrayBuffer로 결합
+      const chunksAll = new Uint8Array(receivedLength);
+      let position = 0;
+      for(let chunk of chunks) {
+        chunksAll.set(chunk, position);
+        position += chunk.length;
+      }
+      
+      await this.loadGLBFromBuffer(chunksAll.buffer, (progress) => {
+        // GLTFLoader 자체 진행률은 무시 (이미 다운로드 진행률 표시함)
+      });
+      
+      loader.style.display = 'none';
+      console.log('Model loaded from path:', path);
+    } catch (error) {
+      console.error('Error loading GLB from path:', error);
+      loader.style.display = 'none';
+      
+      // 대용량 파일 로드 실패 시 파일 선택 유도
+      alert('대용량 파일 로드 실패. 파일 선택 버튼을 사용해 직접 로드해주세요.');
+    }
+  }
+  
+  async loadGLBFileInChunks(file) {
+    const fileSize = (file.size / 1024 / 1024).toFixed(2);
+    document.getElementById('file-size').textContent = `File Size: ${fileSize} MB`;
+    this.stats.fileSize = parseFloat(fileSize);
+    
+    const loader = document.getElementById('loader');
+    const progressBar = loader.querySelector('.progress-bar');
+    const percentEl = document.getElementById('load-percent');
+    loader.style.display = 'block';
+    
+    try {
+      // 대용량 파일을 위한 청크 단위 읽기
+      const CHUNK_SIZE = 64 * 1024 * 1024; // 64MB 청크
+      const chunks = [];
+      let offset = 0;
+      
+      while (offset < file.size) {
+        const chunk = file.slice(offset, offset + CHUNK_SIZE);
+        const arrayBuffer = await this.readChunkAsArrayBuffer(chunk);
+        chunks.push(new Uint8Array(arrayBuffer));
+        offset += CHUNK_SIZE;
+        
+        const percent = Math.round((offset / file.size) * 50); // 읽기는 50%까지
+        progressBar.style.width = `${percent}%`;
+        percentEl.textContent = `Reading: ${percent}%`;
+        
+        // 메모리 압박 완화
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      
+      // 청크 결합
+      percentEl.textContent = 'Combining chunks...';
+      const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+      const combined = new Uint8Array(totalLength);
+      let position = 0;
+      
+      for (const chunk of chunks) {
+        combined.set(chunk, position);
+        position += chunk.length;
+      }
+      
+      percentEl.textContent = 'Loading model...';
+      progressBar.style.width = '75%';
+      
+      await this.loadGLBFromBuffer(combined.buffer, (progress) => {
+        const percent = 75 + Math.round(progress * 25);
+        progressBar.style.width = `${percent}%`;
+        percentEl.textContent = `Loading: ${percent}%`;
+      });
+      
+      loader.style.display = 'none';
+    } catch (error) {
+      console.error('Error loading GLB:', error);
+      loader.style.display = 'none';
+      
+      if (error.message.includes('allocation failed')) {
+        alert('파일이 너무 커서 메모리가 부족합니다.\nDraco 압축된 파일이나 더 작은 파일을 사용해주세요.');
+      } else {
+        alert(`Error loading model: ${error.message}`);
+      }
+    }
+  }
+  
+  readChunkAsArrayBuffer(chunk) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target.result);
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(chunk);
+    });
   }
   
   loadGLBFile(file) {
+    // 작은 파일용 기존 메서드 (1GB 미만)
     const fileSize = (file.size / 1024 / 1024).toFixed(2);
     document.getElementById('file-size').textContent = `File Size: ${fileSize} MB`;
     this.stats.fileSize = parseFloat(fileSize);

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Large GLB Loader - THREE.js</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+      background: #1a1a1a;
+    }
+    
+    #canvas-container {
+      width: 100vw;
+      height: 100vh;
+    }
+    
+    #info {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      background: rgba(0,0,0,0.7);
+      padding: 15px;
+      border-radius: 5px;
+      font-size: 14px;
+      z-index: 100;
+      min-width: 300px;
+    }
+    
+    #info h3 {
+      margin-bottom: 10px;
+      color: #00ff88;
+    }
+    
+    #info div {
+      margin: 5px 0;
+    }
+    
+    #loader {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      font-size: 20px;
+      text-align: center;
+      z-index: 1000;
+    }
+    
+    #loader .progress {
+      width: 300px;
+      height: 20px;
+      background: #333;
+      border-radius: 10px;
+      margin-top: 20px;
+      overflow: hidden;
+    }
+    
+    #loader .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #00ff88, #00ffff);
+      transition: width 0.3s ease;
+    }
+    
+    #file-input {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      z-index: 100;
+    }
+    
+    #file-input input {
+      padding: 10px;
+      background: #333;
+      color: white;
+      border: 1px solid #555;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    
+    .error {
+      color: #ff4444 !important;
+    }
+  </style>
+</head>
+<body>
+  <div id="info">
+    <h3>Performance Monitor</h3>
+    <div id="fps">FPS: 0</div>
+    <div id="memory">Memory: 0 MB</div>
+    <div id="triangles">Triangles: 0</div>
+    <div id="renderer-info">Renderer: Detecting...</div>
+    <div id="webgpu-status">WebGPU: Checking...</div>
+    <div id="file-size">File Size: N/A</div>
+  </div>
+  
+  <div id="loader" style="display: none;">
+    <div>Loading GLB Model...</div>
+    <div class="progress">
+      <div class="progress-bar" style="width: 0%"></div>
+    </div>
+    <div id="load-percent">0%</div>
+  </div>
+  
+  <div id="file-input">
+    <input type="file" id="glb-file" accept=".glb,.gltf">
+  </div>
+  
+  <div id="canvas-container"></div>
+  
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

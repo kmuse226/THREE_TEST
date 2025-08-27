@@ -12,10 +12,10 @@ THREE_TEST/
 │   └── Ship_Room_50-99.glb  # 테스트용 대용량 GLB 파일
 ├── index.html           # 메인 HTML 파일
 ├── memory-test.html     # 브라우저 메모리 한계 테스트 도구
-├── compress-glb.js      # GLB 압축 유틸리티
 ├── glb-analysis.md      # GLB 로딩 문제 분석 문서
 ├── vite.config.js       # Vite 설정
 ├── package.json         # 프로젝트 의존성
+├── CLAUDE.md           # 프로젝트 문서
 └── .gitignore          # Git ignore 설정
 ```
 
@@ -47,11 +47,31 @@ THREE_TEST/
 - **메모리 스트레스 테스트**: 점진적 메모리 할당으로 실제 한계 측정
 - **File API 테스트**: 파일 읽기 성능 및 한계 확인
 
-### 3. GLB 압축 도구 (compress-glb.js)
-- 메시 단순화
-- 텍스처 크기 조정
-- Draco 압축 적용
-- 불필요한 속성 제거
+### 3. GLB 압축 가이드
+브라우저에서는 2.5GB 파일을 압축할 수 없으므로, 오프라인 도구를 사용해야 합니다:
+
+#### gltf-pipeline (권장)
+```bash
+# 설치
+npm install -g gltf-pipeline
+
+# Draco 압축 적용
+gltf-pipeline -i model.glb -o model-compressed.glb --draco.compressionLevel 10
+```
+
+#### gltfpack
+```bash
+# 설치
+npm install -g gltfpack
+
+# Meshopt 압축 적용
+gltfpack -i model.glb -o model-optimized.glb -cc -tc
+```
+
+#### Blender
+1. GLB 파일 import
+2. Decimate Modifier로 폴리곤 감소
+3. Export GLB with Draco compression enabled
 
 ## 기술 스택
 - **THREE.js**: 0.160.0

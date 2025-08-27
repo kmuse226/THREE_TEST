@@ -235,6 +235,35 @@ npm run build
 - [ ] Draco 압축 적용 고려
 - [ ] 모델 분할 검토
 
+## Git 대용량 파일 문제 해결
+
+### 문제: GitHub push 시 대용량 파일 에러
+GitHub은 100MB 이상 파일을 거부합니다. `.gitignore`에 추가해도 이미 커밋 히스토리에 있는 파일은 문제가 됩니다.
+
+### 해결 방법:
+1. **히스토리에서 대용량 파일 완전 제거**:
+```bash
+# Git 히스토리에서 특정 파일 제거
+git filter-branch --force --index-filter \
+  "git rm --cached --ignore-unmatch model/대용량파일.glb" \
+  --prune-empty --tag-name-filter cat -- --all
+
+# 정리된 히스토리를 강제 push
+git push origin main --force
+```
+
+2. **`.gitignore` 설정 확인**:
+```
+node_modules
+dist
+model/*
+```
+
+3. **예방 조치**:
+- 큰 파일은 처음부터 `.gitignore`에 추가
+- 실수로 커밋한 경우 즉시 히스토리에서 제거
+- Git LFS 사용 고려 (대용량 파일 필요 시)
+
 ## 개발 환경
 - Windows 11
 - Node.js 필요

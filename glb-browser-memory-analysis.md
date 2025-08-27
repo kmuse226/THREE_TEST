@@ -221,7 +221,7 @@ function detectBrowserLimits() {
 
 ## 해결 방안
 
-### 1. 파일 분할 (권장)
+### 1. 파일 분할 (가장 현실적)
 ```javascript
 // 서버에서 GLB를 여러 파일로 분할
 async function loadSplitGLB() {
@@ -245,49 +245,93 @@ function mergeGLBParts(buffers) {
 }
 ```
 
-### 2. DRACO 압축 사용
+### 2. DRACO 압축 (빌드 타임에 수행)
+
+**⚠️ 중요: DRACO 압축은 개발자가 미리 수행하는 작업입니다**
+
+```bash
+# 개발 환경에서 압축 (Node.js)
+npx gltf-pipeline -i original.glb -o compressed.glb --draco.compressionLevel 10
+```
+
 ```javascript
-// 메시 데이터 압축 (최대 90% 압축률)
+// 압축 과정 (빌드 타임)
+const gltfPipeline = require('gltf-pipeline');
+const fs = require('fs');
+
+async function compressModelBeforeDeployment() {
+    const glb = fs.readFileSync('original.glb'); // 2.5GB
+    
+    const options = {
+        dracoOptions: {
+            compressionLevel: 10  // 최대 압축
+        }
+    };
+    
+    // DRACO는 메시 데이터만 압축 (텍스처는 압축 안됨!)
+    // 예시: 
+    // - 메시: 1GB → 100MB (90% 압축)
+    // - 텍스처: 1.5GB → 1.5GB (변화 없음)
+    // - 결과: 2.5GB → 1.6GB
+    
+    const result = await gltfPipeline.processGlb(glb, options);
+    fs.writeFileSync('compressed.glb', result.glb); // 1.6GB
+}
+```
+
+```javascript
+// 브라우저에서는 압축 해제만 수행
 const dracoLoader = new DRACOLoader();
-dracoLoader.setDecoderPath('/draco/');
+dracoLoader.setDecoderPath('/draco/'); // WASM 디코더
 
 const gltfLoader = new GLTFLoader();
 gltfLoader.setDRACOLoader(dracoLoader);
 
-// 2.5GB → 500MB로 축소 가능
-gltfLoader.load('compressed-model.glb', (gltf) => {
+// 이미 압축된 1.6GB 파일 로드 (2GB 미만이므로 성공!)
+gltfLoader.load('compressed.glb', (gltf) => {
+    // DRACOLoader가 압축된 메시를 압축 해제
     scene.add(gltf.scene);
 });
 ```
 
-### 3. 스트리밍 파싱 (미래 솔루션)
+### 3. 텍스처 최적화 (별도 압축 필요)
+
 ```javascript
-// 이상적이지만 현재 Three.js 미지원
-async function streamingLoad(url) {
-    const response = await fetch(url);
-    const reader = response.body.getReader();
+// 텍스처는 DRACO로 압축되지 않으므로 별도 처리 필요
+
+// 방법 1: 텍스처를 GLB에서 분리
+async function loadWithSeparateTextures() {
+    // 메시만 포함된 GLB (DRACO 압축됨)
+    const gltf = await gltfLoader.loadAsync('model-geometry.glb'); // 100MB
     
-    let totalSize = 0;
-    const chunks = [];
+    // 텍스처는 KTX2 포맷으로 별도 로드
+    const ktx2Loader = new KTX2Loader();
+    ktx2Loader.setTranscoderPath('/basis/');
     
-    while(true) {
-        const {done, value} = await reader.read();
-        if(done) break;
-        
-        chunks.push(value);
-        totalSize += value.byteLength;
-        
-        // 일정 크기가 모이면 부분 파싱
-        if (totalSize > 100 * 1024 * 1024) { // 100MB
-            await parseAndUploadChunk(chunks);
-            chunks.length = 0;
-            totalSize = 0;
+    const textures = await Promise.all([
+        ktx2Loader.loadAsync('diffuse.ktx2'),   // 원본 500MB → 50MB
+        ktx2Loader.loadAsync('normal.ktx2'),    // 원본 400MB → 40MB
+        ktx2Loader.loadAsync('metalness.ktx2')  // 원본 300MB → 30MB
+    ]);
+    
+    // 텍스처 적용
+    gltf.scene.traverse((child) => {
+        if (child.isMesh) {
+            child.material.map = textures[0];
+            child.material.normalMap = textures[1];
+            child.material.metalnessMap = textures[2];
         }
-    }
+    });
+    
+    return gltf;
 }
+
+// 방법 2: 텍스처 해상도 조정
+// 4K (4096x4096) → 2K (2048x2048) = 75% 메모리 절감
 ```
 
 ### 4. LOD (Level of Detail) 시스템
+
 ```javascript
 // 거리에 따라 다른 해상도 모델 로드
 class LODManager {
@@ -312,21 +356,38 @@ class LODManager {
 }
 ```
 
-### 5. 텍스처 최적화
+### 5. 스트리밍 로드 (실험적)
+
 ```javascript
-// 텍스처를 별도로 로드하고 압축 포맷 사용
-async function optimizeTextures() {
-    const textureLoader = new THREE.TextureLoader();
+// Three.js는 현재 지원하지 않지만, 커스텀 구현 가능
+class StreamingGLBLoader {
+    async load(url) {
+        const response = await fetch(url);
+        const reader = response.body.getReader();
+        
+        let chunks = [];
+        let totalSize = 0;
+        
+        while(true) {
+            const {done, value} = await reader.read();
+            if(done) break;
+            
+            chunks.push(value);
+            totalSize += value.byteLength;
+            
+            // 100MB씩 처리
+            if(totalSize > 100 * 1024 * 1024) {
+                await this.processChunks(chunks);
+                chunks = [];
+                totalSize = 0;
+            }
+        }
+    }
     
-    // KTX2 압축 텍스처 사용 (GPU 압축)
-    const ktx2Loader = new KTX2Loader();
-    ktx2Loader.setTranscoderPath('/basis/');
-    
-    // 원본: 4096x4096 RGBA (64MB)
-    // 압축: 4096x4096 KTX2 (4MB)
-    const compressedTexture = await ktx2Loader.loadAsync('texture.ktx2');
-    
-    return compressedTexture;
+    async processChunks(chunks) {
+        // 청크를 파싱하고 즉시 GPU로 업로드
+        // ArrayBuffer 2GB 제한 우회
+    }
 }
 ```
 
@@ -342,106 +403,138 @@ async function optimizeTextures() {
 
 ### 즉시 적용 가능한 해결책
 
-#### 우선순위 1: 파일 분할
+#### 우선순위 1: 파일 크기 축소
 ```javascript
-// 실무 적용 예제
-class SmartGLBLoader {
-    constructor(maxSize = 1.5 * 1024 * 1024 * 1024) { // 1.5GB 안전 마진
-        this.maxSize = maxSize;
-    }
-    
-    async load(url, fileSize) {
-        if (fileSize > this.maxSize) {
-            console.log('파일 분할 로드 사용');
-            return await this.loadSplit(url);
-        } else {
-            console.log('일반 로드 사용');
-            return await this.loadNormal(url);
+// 실무 적용 체크리스트
+const optimizationChecklist = {
+    // 1. 파일 크기 확인
+    async checkFileSize(url) {
+        const response = await fetch(url, { method: 'HEAD' });
+        const size = parseInt(response.headers.get('content-length'));
+        const sizeMB = (size / 1024 / 1024).toFixed(2);
+        
+        if (size > 2 * 1024 * 1024 * 1024) {
+            console.warn(`파일 크기: ${sizeMB}MB - 최적화 필요!`);
+            return false;
         }
-    }
+        return true;
+    },
     
-    async loadSplit(url) {
-        // 서버에서 분할된 파일 목록 가져오기
-        const manifest = await fetch(`${url}.manifest`).then(r => r.json());
+    // 2. 최적화 전략 선택
+    getOptimizationStrategy(fileSize) {
+        const strategies = [];
         
-        const parts = await Promise.all(
-            manifest.parts.map(part => 
-                fetch(part.url).then(r => r.arrayBuffer())
-            )
-        );
+        if (fileSize > 2 * 1024 * 1024 * 1024) {
+            strategies.push('파일 분할');
+        }
         
-        return this.mergeParts(parts, manifest);
+        strategies.push('DRACO 메시 압축 (빌드 타임)');
+        strategies.push('텍스처 분리 및 KTX2 압축');
+        strategies.push('LOD 시스템 구현');
+        
+        return strategies;
     }
+};
+```
+
+#### 우선순위 2: 빌드 파이프라인 구축
+
+```bash
+# package.json 스크립트
+{
+  "scripts": {
+    "optimize-models": "node scripts/optimize-glb.js",
+    "compress-textures": "node scripts/compress-textures.js"
+  }
 }
 ```
 
-#### 우선순위 2: 압축 적용
-- DRACO: 메시 데이터 70-90% 압축
-- KTX2/Basis: 텍스처 90% 압축
-- gzip: 전송 시 30-50% 추가 압축
+```javascript
+// scripts/optimize-glb.js
+const gltfPipeline = require('gltf-pipeline');
+const fs = require('fs');
+const path = require('path');
 
-#### 우선순위 3: LOD 시스템
-- 원거리: 저해상도 모델 (100MB)
-- 중거리: 중해상도 모델 (500MB)
-- 근거리: 고해상도 모델 (1GB)
+async function optimizeAllModels() {
+    const modelsDir = './models/original';
+    const outputDir = './models/optimized';
+    
+    const files = fs.readdirSync(modelsDir);
+    
+    for (const file of files) {
+        if (file.endsWith('.glb')) {
+            const input = path.join(modelsDir, file);
+            const output = path.join(outputDir, file);
+            
+            const glb = fs.readFileSync(input);
+            const stats = fs.statSync(input);
+            
+            console.log(`처리중: ${file} (${(stats.size/1024/1024).toFixed(2)}MB)`);
+            
+            // 2GB 이상이면 경고
+            if (stats.size > 2 * 1024 * 1024 * 1024) {
+                console.error(`⚠️ ${file}는 2GB를 초과합니다. 분할이 필요합니다!`);
+                continue;
+            }
+            
+            // DRACO 압축 적용
+            const result = await gltfPipeline.processGlb(glb, {
+                dracoOptions: {
+                    compressionLevel: 7
+                }
+            });
+            
+            fs.writeFileSync(output, result.glb);
+            
+            const newStats = fs.statSync(output);
+            const reduction = ((1 - newStats.size/stats.size) * 100).toFixed(2);
+            console.log(`✅ 완료: ${(newStats.size/1024/1024).toFixed(2)}MB (${reduction}% 감소)`);
+        }
+    }
+}
+
+optimizeAllModels();
+```
 
 ### 중장기 개선 방향
 
-1. **Three.js 스트리밍 파서 개발**
-   - ArrayBuffer 없이 청크 단위 파싱
-   - 커뮤니티 기여 또는 자체 개발
+1. **Three.js 커스텀 로더 개발**
+   - ArrayBuffer 없이 스트리밍 파싱
+   - 청크 단위 처리
 
-2. **WebAssembly 활용**
-   - WASM 메모리는 4GB까지 가능
+2. **서버 사이드 처리**
+   - 동적 LOD 생성
+   - 실시간 압축/분할 API
+
+3. **WebAssembly 활용**
    - C++ 파서를 WASM으로 컴파일
-
-3. **서버 사이드 프리프로세싱**
-   - 모델 자동 분할 API
-   - 실시간 LOD 생성
+   - 4GB 메모리 제한 활용
 
 ### 실무 체크리스트
 
 ```javascript
-// 프로덕션 환경 체크리스트
-const productionChecklist = {
-    // 1. 브라우저 호환성 체크
-    checkCompatibility() {
-        try {
-            new ArrayBuffer(2.1 * 1024 * 1024 * 1024);
-            return false; // 2GB 초과 불가
-        } catch(e) {
-            return true; // 분할 필요
-        }
+// 프로덕션 배포 전 체크리스트
+const deploymentChecklist = {
+    // 1. 모든 GLB 파일 크기 검증
+    validateAllModels() {
+        const MAX_SIZE = 1.8 * 1024 * 1024 * 1024; // 1.8GB (안전 마진)
+        // 모든 파일 검사
     },
     
-    // 2. 파일 크기 확인
-    async checkFileSize(url) {
-        const response = await fetch(url, { method: 'HEAD' });
-        const size = parseInt(response.headers.get('content-length'));
-        return size;
+    // 2. 브라우저 호환성 테스트
+    testBrowserCompatibility() {
+        const browsers = ['Chrome', 'Firefox', 'Safari', 'Edge'];
+        // 각 브라우저에서 로드 테스트
     },
     
-    // 3. 적응형 로딩 전략
-    async adaptiveLoad(url) {
-        const size = await this.checkFileSize(url);
-        const needsSplit = this.checkCompatibility();
-        
-        if (size > 2 * 1024 * 1024 * 1024 || needsSplit) {
-            console.warn(`파일 크기 ${(size/1024/1024/1024).toFixed(2)}GB - 분할 로드 필요`);
-            return 'split-loading';
-        } else {
-            return 'normal-loading';
-        }
-    },
-    
-    // 4. 성능 모니터링
-    monitorPerformance() {
-        if (performance.memory) {
-            const used = performance.memory.usedJSHeapSize;
-            const limit = performance.memory.jsHeapSizeLimit;
-            const usage = (used / limit * 100).toFixed(2);
-            console.log(`메모리 사용률: ${usage}%`);
-        }
+    // 3. 성능 메트릭 수집
+    collectPerformanceMetrics() {
+        return {
+            downloadTime: 0,
+            parseTime: 0,
+            gpuUploadTime: 0,
+            totalMemoryUsed: 0
+        };
     }
 };
 ```
@@ -454,24 +547,23 @@ const productionChecklist = {
 - [Chrome Memory Limits - Text/Plain Blog](https://textslashplain.com/2020/09/15/browser-memory-limits/)
 - [MDN ArrayBuffer Documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer)
 - [MDN WebGL Best Practices](https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/WebGL_best_practices)
-- [Chrome DevTools Memory Profiling](https://developer.chrome.com/docs/devtools/memory-problems/)
-
-### 관련 이슈 및 논의
-- Chrome V8 2GB 제한: [Chromium Issue #416284](https://bugs.chromium.org/p/chromium/issues/detail?id=416284)
-- Firefox 대용량 ArrayBuffer: Mozilla Bug #1366341
-- Three.js 스트리밍 지원: [Three.js Issue #19897](https://github.com/mrdoob/three.js/issues/19897)
-- WebGL 메모리 제한: [WebGL Dev List Discussion](https://groups.google.com/g/webgl-dev-list/c/TrPjvxVk5rc)
+- [glTF Pipeline - 3D Tiles](https://github.com/CesiumGS/gltf-pipeline)
 
 ### 도구 및 라이브러리
 - [DRACO 3D Geometry Compression](https://google.github.io/draco/)
 - [KTX2/Basis Universal Texture Compression](https://github.com/KhronosGroup/KTX-Software)
 - [Three.js GLTFLoader](https://threejs.org/docs/#examples/en/loaders/GLTFLoader)
+- [gltfpack - Model Optimizer](https://github.com/zeux/meshoptimizer)
+
+### 관련 이슈
+- Chrome V8 2GB 제한: [Chromium Issue #416284](https://bugs.chromium.org/p/chromium/issues/detail?id=416284)
+- Three.js 스트리밍 지원: [Three.js Issue #19897](https://github.com/mrdoob/three.js/issues/19897)
 
 ---
 
 *문서 작성일: 2025년 1월*  
 *작성자: Claude AI Assistant*  
-*버전: 1.0*
+*버전: 2.0 (수정판)*
 
 ## 부록: 빠른 테스트 코드
 

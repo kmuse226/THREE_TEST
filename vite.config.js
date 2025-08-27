@@ -3,7 +3,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   server: {
     port: 3000,
-    open: true,
+    open: '/index-webgpu.html', // WebGPU 버전을 기본으로
     // 대용량 파일 처리를 위한 설정
     fs: {
       strict: false,

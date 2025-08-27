@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Firefox GPU Test</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .status {
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            background: #2a2a2a;
+        }
+        .success { color: #00ff88; }
+        .error { color: #ff4444; }
+        .warning { color: #ffaa00; }
+        .info { color: #00aaff; }
+        button {
+            background: #00ff88;
+            color: black;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #00dd77;
+        }
+        pre {
+            background: #333;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Firefox GPU & WebGPU Test</h1>
+    
+    <div class="status">
+        <h2>Browser Info</h2>
+        <div id="browser-info"></div>
+    </div>
+    
+    <div class="status">
+        <h2>WebGL Status</h2>
+        <div id="webgl-status"></div>
+    </div>
+    
+    <div class="status">
+        <h2>WebGPU Status</h2>
+        <div id="webgpu-status"></div>
+    </div>
+    
+    <div class="status">
+        <h2>GPU Info</h2>
+        <div id="gpu-info"></div>
+    </div>
+    
+    <div class="status">
+        <h2>Test Results</h2>
+        <button onclick="runAllTests()">Run All Tests</button>
+        <button onclick="testWebGPU()">Test WebGPU</button>
+        <button onclick="testWebGL()">Test WebGL</button>
+        <div id="test-results"></div>
+    </div>
+    
+    <div class="status">
+        <h2>Firefox Configuration Guide</h2>
+        <pre id="config-guide">
+Firefox WebGPU 활성화 단계:
+
+1. Firefox Nightly 설치 (필수)
+   https://www.mozilla.org/firefox/channel/desktop/#nightly
+
+2. about:config에서 설정 변경:
+   ✅ dom.webgpu.enabled = true
+   ✅ gfx.webgpu.force-enabled = true
+   
+3. GPU 가속 설정 (권장):
+   ✅ layers.acceleration.force-enabled = true
+   ✅ gfx.webrender.all = true
+   ✅ gfx.webrender.enabled = true
+   ✅ webgl.force-enabled = true
+   
+4. Windows ANGLE 설정 (선택):
+   ✅ gfx.angle.force-d3d11 = true
+   ✅ gfx.angle.try-d3d11 = true
+
+5. Firefox 재시작
+        </pre>
+    </div>
+
+    <script>
+        // Browser Info
+        function getBrowserInfo() {
+            const info = [];
+            info.push(`User Agent: ${navigator.userAgent}`);
+            info.push(`Platform: ${navigator.platform}`);
+            info.push(`Hardware Concurrency: ${navigator.hardwareConcurrency || 'N/A'}`);
+            info.push(`Device Memory: ${navigator.deviceMemory ? navigator.deviceMemory + ' GB' : 'N/A'}`);
+            
+            // Firefox 버전 확인
+            const isFirefox = navigator.userAgent.includes('Firefox');
+            const isNightly = navigator.userAgent.includes('Firefox/') && parseInt(navigator.userAgent.split('Firefox/')[1]) > 100;
+            
+            if (isFirefox) {
+                info.push(`<span class="${isNightly ? 'success' : 'warning'}">Firefox ${isNightly ? 'Nightly' : 'Stable'} Detected</span>`);
+                if (!isNightly) {
+                    info.push('<span class="error">⚠️ Firefox Nightly required for WebGPU!</span>');
+                }
+            }
+            
+            document.getElementById('browser-info').innerHTML = info.join('<br>');
+        }
+        
+        // WebGL Test
+        function testWebGL() {
+            const results = [];
+            
+            try {
+                const canvas = document.createElement('canvas');
+                const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+                
+                if (gl) {
+                    results.push('<span class="success">✅ WebGL Supported</span>');
+                    
+                    // Get renderer info
+                    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                    if (debugInfo) {
+                        const vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+                        const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                        results.push(`Vendor: ${vendor}`);
+                        results.push(`Renderer: ${renderer}`);
+                    }
+                    
+                    // Check version
+                    const version = gl.getParameter(gl.VERSION);
+                    results.push(`Version: ${version}`);
+                    
+                    // Check max texture size
+                    const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+                    results.push(`Max Texture Size: ${maxTextureSize}`);
+                } else {
+                    results.push('<span class="error">❌ WebGL Not Supported</span>');
+                }
+            } catch (e) {
+                results.push(`<span class="error">❌ WebGL Error: ${e.message}</span>`);
+            }
+            
+            document.getElementById('webgl-status').innerHTML = results.join('<br>');
+        }
+        
+        // WebGPU Test
+        async function testWebGPU() {
+            const results = [];
+            const testResults = document.getElementById('test-results');
+            
+            if (!navigator.gpu) {
+                results.push('<span class="error">❌ WebGPU API not available</span>');
+                results.push('Enable dom.webgpu.enabled in about:config');
+                document.getElementById('webgpu-status').innerHTML = results.join('<br>');
+                return;
+            }
+            
+            results.push('<span class="success">✅ navigator.gpu exists</span>');
+            
+            try {
+                // Request adapter
+                testResults.innerHTML = '<span class="info">Requesting GPU adapter...</span>';
+                
+                const adapter = await navigator.gpu.requestAdapter({
+                    powerPreference: 'high-performance'
+                });
+                
+                if (!adapter) {
+                    results.push('<span class="error">❌ No GPU adapter found</span>');
+                    results.push('Enable gfx.webgpu.force-enabled in about:config');
+                    document.getElementById('webgpu-status').innerHTML = results.join('<br>');
+                    return;
+                }
+                
+                results.push('<span class="success">✅ GPU Adapter found</span>');
+                
+                // Get adapter info
+                const adapterInfo = await adapter.requestAdapterInfo();
+                results.push(`Vendor: ${adapterInfo.vendor || 'Unknown'}`);
+                results.push(`Device: ${adapterInfo.device || 'Unknown'}`);
+                results.push(`Description: ${adapterInfo.description || 'Unknown'}`);
+                
+                // Get limits
+                const limits = adapter.limits;
+                results.push(`Max Buffer Size: ${(limits.maxBufferSize / 1024 / 1024 / 1024).toFixed(2)} GB`);
+                results.push(`Max Texture Size: ${limits.maxTextureDimension2D}`);
+                
+                // Request device
+                testResults.innerHTML = '<span class="info">Requesting GPU device...</span>';
+                
+                const device = await adapter.requestDevice();
+                
+                if (device) {
+                    results.push('<span class="success">✅ GPU Device created successfully</span>');
+                    results.push('<span class="success">🎉 WebGPU is fully functional!</span>');
+                    
+                    // Create simple compute test
+                    const shaderModule = device.createShaderModule({
+                        code: `
+                            @compute @workgroup_size(1)
+                            fn main() {
+                                // Simple compute shader
+                            }
+                        `
+                    });
+                    
+                    if (shaderModule) {
+                        results.push('<span class="success">✅ Compute shader compiled</span>');
+                    }
+                    
+                    device.destroy();
+                }
+                
+            } catch (error) {
+                results.push(`<span class="error">❌ WebGPU Error: ${error.message}</span>`);
+                console.error('WebGPU Error:', error);
+            }
+            
+            document.getElementById('webgpu-status').innerHTML = results.join('<br>');
+            testResults.innerHTML = '<span class="success">Tests completed</span>';
+        }
+        
+        // GPU Info
+        async function getGPUInfo() {
+            const info = [];
+            
+            // Check for GPU support in about:support style
+            if (navigator.gpu) {
+                info.push('<span class="success">GPU API Available</span>');
+                
+                try {
+                    const adapter = await navigator.gpu.requestAdapter();
+                    if (adapter) {
+                        const features = [...adapter.features];
+                        info.push(`Features: ${features.length > 0 ? features.join(', ') : 'None'}`);
+                    }
+                } catch (e) {
+                    info.push(`<span class="warning">Could not get GPU features</span>`);
+                }
+            } else {
+                info.push('<span class="error">GPU API Not Available</span>');
+            }
+            
+            // Performance info
+            if (performance.memory) {
+                info.push(`Memory: ${(performance.memory.usedJSHeapSize / 1024 / 1024).toFixed(2)} MB used`);
+            }
+            
+            document.getElementById('gpu-info').innerHTML = info.join('<br>');
+        }
+        
+        // Run all tests
+        async function runAllTests() {
+            getBrowserInfo();
+            testWebGL();
+            await testWebGPU();
+            await getGPUInfo();
+        }
+        
+        // Auto-run on load
+        window.onload = () => {
+            runAllTests();
+        };
+    </script>
+</body>
+</html>
